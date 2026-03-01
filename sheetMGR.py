@@ -13,7 +13,7 @@ conn = st.connection("gsheets", type=GSheetsConnection)
 def get_drive_service():
     scope = ["https://www.googleapis.com/auth/drive"]
     # Assicurati che il percorso del JSON sia corretto o usa i secrets
-    creds = ServiceAccountCredentials.from_json_keyfile_name("tuo_file_credenziali.json", scope)
+    creds = ServiceAccountCredentials.from_json_keyfile_name("credenziali_google.json", scope)
     return build('drive', 'v3', credentials=creds)
 
 def upload_to_drive(file):
