@@ -16,14 +16,24 @@ def get_gspread_client():
     return gspread.authorize(creds)
 
 def upload_to_imgbb(uploaded_file):
-    api_key = st.secrets["IMGBB_API_KEY"]
-    url = "https://api.imgbb.com/1/upload"
-    img_b64 = base64.b64encode(uploaded_file.getvalue()).decode('utf-8')
-    payload = {"key": api_key, "image": img_b64, "name": uploaded_file.name}
+    if uploaded_file is None:
+        return None
+        
     try:
+        # Usiamo .getvalue() che è più stabile per i file caricati in Streamlit
+        img_bytes = uploaded_file.getvalue() 
+        if not img_bytes:
+            return None
+            
+        api_key = st.secrets["IMGBB_API_KEY"]
+        url = "https://api.imgbb.com/1/upload"
+        img_b64 = base64.b64encode(img_bytes).decode('utf-8')
+        
+        payload = {"key": api_key, "image": img_b64, "name": uploaded_file.name}
         response = requests.post(url, data=payload)
         return response.json()["data"]["url"]
-    except:
+    except Exception as e:
+        st.error(f"Errore caricamento ImgBB: {e}")
         return None
 
 # --- 2. LOGICA DI CONNESSIONE ---
