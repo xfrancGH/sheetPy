@@ -1,32 +1,57 @@
 import streamlit as st
-from streamlit_gsheets import GSheetsConnection
-import pandas as pd
-from googleapiclient.discovery import build
-from googleapiclient.http import MediaIoBaseUpload
-from oauth2client.service_account import ServiceAccountCredentials
 import io
+from streamlit_gsheets import GSheetsConnection
+from googleapiclient.discovery import build
+from google.oauth2 import service_account
+from googleapiclient.http import MediaIoBaseUpload
 
-# 1. Configurazione Connessioni
+# 1. Configurazione Sheet (Streamlit legge in automatico dai secrets)
 conn = st.connection("gsheets", type=GSheetsConnection)
 
-# Per Drive usiamo le stesse credenziali del service account
+# 2. Configurazione Drive (Manuale tramite i secrets condivisi)
 def get_drive_service():
-    scope = ["https://www.googleapis.com/auth/drive"]
-    # Assicurati che il percorso del JSON sia corretto o usa i secrets
-    creds = ServiceAccountCredentials.from_json_keyfile_name("credenziali_google.json", scope)
-    return build('drive', 'v3', credentials=creds)
+    # Creiamo le credenziali partendo dal dizionario memorizzato nei secrets
+    # Assicurati che i nomi delle chiavi nei secrets corrispondano a quelli del JSON
+    info = st.secrets["connections"]["gsheets"]
+    creds = service_account.Credentials.from_service_account_info(info)
+    
+    # Definiamo lo scope per Drive (se non è già incluso nei secrets)
+    scoped_creds = creds.with_scopes(['https://www.googleapis.com/auth/drive'])
+    
+    return build('drive', 'v3', credentials=scoped_creds)
 
 def upload_to_drive(file):
     service = get_drive_service()
-    file_metadata = {'name': file.name}
-    media = MediaIoBaseUpload(io.BytesIO(file.getvalue()), mimetype=file.type)
     
-    # Carica il file
-    uploaded_file = service.files().create(body=file_metadata, media_body=media, fields='id').execute()
+    # ID della cartella che hai creato e CONDIVISO con l'email del service account
+    FOLDER_ID = '1Rcl6R2nu-Ph8E2mdBTggnm67n9yL-bjv' 
+    
+    file_metadata = {
+        'name': file.name,
+        'parents': [FOLDER_ID]
+    }
+    
+    # Importante: riavvolgi il file se è stato già letto
+    file.seek(0)
+    media = MediaIoBaseUpload(io.BytesIO(file.read()), mimetype=file.type, resumable=True)
+    
+    # Esecuzione del caricamento
+    uploaded_file = service.files().create(
+        body=file_metadata,
+        media_body=media,
+        fields='id',
+        # Questa riga è fondamentale se lavori in contesti Workspace/Shared Drives
+        supportsAllDrives=True 
+    ).execute()
+    
     file_id = uploaded_file.get('id')
     
-    # Rendi il file pubblico (necessario perché la formula =IMAGE lo veda)
-    service.permissions().create(fileId=file_id, body={'type': 'anyone', 'role': 'reader'}).execute()
+    # Rendi il file leggibile per la funzione =IMAGE() di Sheets
+    service.permissions().create(
+        fileId=file_id,
+        body={'type': 'anyone', 'role': 'reader'},
+        supportsAllDrives=True
+    ).execute()
     
     return f"https://drive.google.com/uc?export=view&id={file_id}"
 
