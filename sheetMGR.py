@@ -6,7 +6,7 @@ import base64
 import gspread
 from google.oauth2.service_account import Credentials
 
-# --- 1. CONFIGURAZIONE ---
+# --- 1. CONFIGURAZIONE ESTRATTA DAI SECRETS ---
 SPREADSHEET_URL = st.secrets["connections"]["gsheets"]["spreadsheet"]
 
 def get_gspread_client():
@@ -27,6 +27,7 @@ def upload_to_imgbb(uploaded_file):
     except: return None
 
 def extract_url(value):
+    """Estrae l'URL ignorando i caratteri della formula =IMAGE()"""
     v = str(value).strip()
     if not v or v.lower() in ['nan', 'none', '']: return None
     if '"' in v:
@@ -48,41 +49,54 @@ with tab1:
     with st.form("insert_form", clear_on_submit=True):
         t_latex = st.text_area("Testo LaTeX (Obbligatorio):")
         img_file = st.file_uploader("Immagine (Opzionale):", type=['png', 'jpg', 'jpeg'])
-        submit = st.form_submit_button("Salva")
+        submit = st.form_submit_button("Salva nel Cloud")
 
     if submit and t_latex:
         with st.spinner("Salvataggio..."):
+            # Lettura veloce per calcolo ID
             df_check = conn.read().dropna(how="all")
             df_check.columns = [c.upper().strip() for c in df_check.columns]
             next_id = int(df_check['ID'].max()) + 1 if ('ID' in df_check.columns and not df_check.empty) else 1
+            
             url_img = upload_to_imgbb(img_file)
             valore_img = f'=IMAGE("{url_img}")' if url_img else ""
             
             gc = get_gspread_client()
             ws = gc.open_by_url(SPREADSHEET_URL).get_worksheet(0)
             ws.append_row([next_id, t_latex, valore_img], value_input_option='USER_ENTERED')
-            st.success(f"Salvato ID {next_id}!")
+            st.success(f"Esercizio {next_id} creato!")
             st.cache_data.clear()
 
-# --- TAB 2: ARCHIVIO E MODIFICA (Lazy Loading) ---
+# --- TAB 2: ARCHIVIO E MODIFICA ---
 with tab2:
     st.header("Gestione Database")
     
-    with st.spinner("Sincronizzazione Cloud..."):
+    with st.spinner("Sincronizzazione in corso..."):
         try:
             gc = get_gspread_client()
             ws = gc.open_by_url(SPREADSHEET_URL).get_worksheet(0)
+            # Leggiamo le FORMULE per estrarre gli URL delle immagini
             data = ws.get_all_records(value_render_option='FORMULA')
             df = pd.DataFrame(data).dropna(how="all")
             df.columns = [c.upper().strip() for c in df.columns]
         except Exception as e:
-            st.error(f"Errore: {e}")
+            st.error(f"Errore di connessione: {e}")
             df = pd.DataFrame()
 
     if not df.empty:
-        search = st.text_input("Filtra per contenuto LaTeX:")
+        col_search, col_id = st.columns([3, 1])
+        with col_search:
+            search = st.text_input("Filtra per testo LaTeX:")
+        with col_id:
+            id_f = st.number_input("Cerca ID esatto:", min_value=0, step=1)
+
+        # Filtri
         if search:
             df = df[df['TESTO'].str.contains(search, case=False, na=False)]
+        if id_f > 0:
+            df = df[df['ID'].astype(int) == id_f]
+
+        st.divider()
 
         for index, row in df.iterrows():
             url_display = extract_url(row['IMMAGINE'])
@@ -92,26 +106,31 @@ with tab2:
                 
                 with c_img:
                     if url_display:
-                        # LAZY LOADING: L'immagine viene caricata solo se l'utente la richiede
-                        check_view = st.checkbox("👁️ Carica Immagine", key=f"view_{row['ID']}")
-                        if check_view:
-                            st.image(url_display, width=300, caption=f"Esercizio {row['ID']}")
+                        if st.checkbox("👁️ Carica Immagine", key=f"v_{row['ID']}"):
+                            st.image(url_display, width=300)
                     else:
-                        st.info("Nessuna immagine associata")
+                        st.info("Nessuna immagine")
                 
                 with c_text:
                     st.latex(row['TESTO'])
                     
-                    with st.popover("📝 Modifica rapida"):
-                        edit_t = st.text_area("Modifica testo:", value=row['TESTO'], key=f"edit_t_{row['ID']}")
-                        edit_i = st.file_uploader("Sostituisci immagine:", type=['png', 'jpg'], key=f"edit_i_{row['ID']}")
+                    with st.popover("📝 Modifica"):
+                        new_t = st.text_area("Testo LaTeX:", value=row['TESTO'], key=f"et_{row['ID']}")
+                        new_i = st.file_uploader("Cambia immagine:", type=['png', 'jpg'], key=f"ei_{row['ID']}")
                         
-                        if st.button("Salva modifiche", key=f"save_b_{row['ID']}"):
-                            with st.spinner("Aggiornamento riga..."):
-                                f_val = f'=IMAGE("{upload_to_imgbb(edit_i)}")' if edit_i else row['IMMAGINE']
+                        if st.button("Salva Modifiche", key=f"eb_{row['ID']}"):
+                            with st.spinner("Aggiornamento..."):
+                                if new_i:
+                                    up_url = upload_to_imgbb(new_i)
+                                    final_val = f'=IMAGE("{up_url}")' if up_url else ""
+                                else:
+                                    final_val = row['IMMAGINE']
+
                                 cell = ws.find(str(int(row['ID'])), in_column=1)
                                 if cell:
-                                    ws.update_cell(cell.row, 2, edit_t)
-                                    ws.update_cell(cell.row, 3, f_val)
+                                    ws.update_cell(cell.row, 2, new_t)
+                                    ws.update_cell(cell.row, 3, final_val)
                                     st.cache_data.clear()
                                     st.rerun()
+    else:
+        st.warning("Il database è vuoto o non accessibile.")
