@@ -92,10 +92,13 @@ with tab2:
                 c_img, c_text = st.columns([1, 2])
                 with c_img:
                     if url_display:
-                        st.image(url_display, width=300)
+                        # Usiamo un checkbox come interruttore "Mostra/Nascondi"
+                        show_img = st.checkbox("👁️ Vedi Immagine", key=f"show_{row['ID']}")
+                        if show_img:
+                            st.image(url_display, width=300)
                     else:
-                        st.info("Nessuna immagine") # Ora questo apparirà solo se la cella è davvero vuota
-                
+                        st.info("Nessuna immagine")
+                                
                 with c_text:
                     st.latex(row['TESTO'])
                     with st.popover("📝 Modifica"):
